@@ -1,15 +1,4 @@
 /* content.css */
 .share-screenshot-btn {
-    margin-left: 20px;
-    color: #8590a6; /* 知乎默认按钮颜色 */
-    transition: color 0.3s;
-    font-size: 14px;
-    cursor: pointer;
-    background: transparent;
-    border: none;
-    padding: 0;
-}
-
-.share-screenshot-btn:hover {
-    color: #76839b; /* 知乎悬浮颜色 */
+    margin-left: 24px;
 }

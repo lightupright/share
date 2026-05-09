@@ -77,11 +77,11 @@ function addShareButtons() {
         shareBtn.type = 'button';
         shareBtn.className = 'Button ContentItem-action Button--plain Button--withIcon Button--withLabel share-screenshot-btn';
         shareBtn.innerHTML = `
-            <span style="display: inline-flex; align-items: center;">
-                <svg viewBox="0 0 24 24" width="1.2em" height="1.2em" fill="currentColor" style="margin-right: 4px;">
+            <span style="display: inline-flex; align-items: center;">&#8203;
+                <svg viewBox="0 0 24 24" class="Zi Zi--InsertImage Button-zi" fill="currentColor" width="1.2em" height="1.2em" style="margin-right: 4px;">
                     <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
                 </svg>
-                截图分享
+                截图
             </span>
         `;
         
@@ -169,8 +169,19 @@ function addShareButtons() {
             }
         });
 
-        // 将按钮添加到操作栏的末尾
-        bar.appendChild(shareBtn);
+        // 尝试找到知乎自带的“分享”按钮节点
+        const shareNode = Array.from(bar.children).find(child => child.textContent && child.textContent.includes('分享'));
+        
+        if (shareNode && shareNode.nextSibling) {
+            // 插入到分享按钮之后
+            bar.insertBefore(shareBtn, shareNode.nextSibling);
+        } else if (bar.lastElementChild) {
+            // 如果没找到“分享”文字，则插到倒数第一个元素（通常是“...”）的前面
+            bar.insertBefore(shareBtn, bar.lastElementChild);
+        } else {
+            // 兜底方案：添加到末尾
+            bar.appendChild(shareBtn);
+        }
     });
 }
 
