@@ -1,4 +1,65 @@
 // content.js
+
+function showCopyModal(blobUrl) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.6);z-index:999999;display:flex;align-items:center;justify-content:center;flex-direction:column;';
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:#fff;padding:24px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.3);display:flex;flex-direction:column;align-items:center;max-width:80vw;max-height:80vh;';
+
+    const title = document.createElement('h2');
+    title.textContent = '截图生成完毕！';
+    title.style.cssText = 'margin:0 0 16px 0;font-size:20px;color:#121212;';
+
+    const imgPreview = document.createElement('img');
+    imgPreview.src = blobUrl;
+    imgPreview.style.cssText = 'max-width:100%;max-height:calc(85vh - 130px);object-fit:contain;border:1px solid #eee;border-radius:4px;';
+
+    const btnContainer = document.createElement('div');
+    btnContainer.style.cssText = 'margin-top:20px;display:flex;gap:16px;';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = '点击复制到剪贴板';
+    copyBtn.style.cssText = 'padding:10px 32px;font-size:16px;background:#056de8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:bold;';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '关闭';
+    closeBtn.style.cssText = 'padding:10px 32px;font-size:16px;background:#f6f6f6;color:#8590a6;border:none;border-radius:6px;cursor:pointer;';
+
+    const cleanup = () => {
+        if(document.body.contains(overlay)) document.body.removeChild(overlay);
+        URL.revokeObjectURL(blobUrl);
+    };
+
+    copyBtn.addEventListener('click', async () => {
+        try {
+            const response = await fetch(blobUrl);
+            const blob = await response.blob();
+            const clipboardItem = new ClipboardItem({ 'image/png': blob });
+            await navigator.clipboard.write([clipboardItem]);
+            
+            copyBtn.textContent = '已复制！';
+            copyBtn.style.background = '#4caf50';
+            setTimeout(cleanup, 1000);
+        } catch (err) {
+            console.error(err);
+            alert('复制失败，请重试或右键上方图片直接复制/保存。');
+        }
+    });
+
+    closeBtn.addEventListener('click', cleanup);
+    
+    btnContainer.appendChild(copyBtn);
+    btnContainer.appendChild(closeBtn);
+
+    modal.appendChild(title);
+    modal.appendChild(imgPreview);
+    modal.appendChild(btnContainer);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+}
+
 function addShareButtons() {
     // 找到所有还没有分享按钮的回答操作栏
     const actionBars = document.querySelectorAll('.ContentItem-actions:not(.has-share-btn)');
@@ -35,30 +96,7 @@ function addShareButtons() {
 
             if (state === 'generating') return;
 
-            // 第二次点击：将已经生成的截图写入剪贴板
-            if (state === 'ready') {
-                try {
-                    const response = await fetch(shareBtn.dataset.blobUrl);
-                    const blob = await response.blob();
-                    const clipboardItem = new ClipboardItem({ 'image/png': blob });
-                    await navigator.clipboard.write([clipboardItem]);
-                    
-                    shareBtn.innerHTML = '<span style="display: inline-flex; align-items: center; color: #175199;">已复制到剪切板</span>';
-                    shareBtn.dataset.state = 'idle';
-                    
-                    setTimeout(() => {
-                        shareBtn.innerHTML = originalText;
-                        URL.revokeObjectURL(shareBtn.dataset.blobUrl);
-                        shareBtn.dataset.blobUrl = '';
-                    }, 3000);
-                } catch (err) {
-                    console.error('写入剪切板失败:', err);
-                    alert('复制失败，请确保页面已聚焦。');
-                }
-                return;
-            }
-
-            // 第一次点击：开始生成截图
+            // 开始生成截图
             shareBtn.dataset.state = 'generating';
             shareBtn.innerHTML = '<span style="display: inline-flex; align-items: center;">生成中...</span>';
             
@@ -67,11 +105,11 @@ function addShareButtons() {
                 const expandBtn = item.querySelector('.ContentItem-more, .ContentItem-expandButton');
                 if (expandBtn && (expandBtn.textContent.includes('阅读全文') || expandBtn.textContent.includes('展开'))) {
                     expandBtn.click();
-                    // 等待展开动画和内容加载完成（可根据情况适当调整延迟）
-                    await new Promise(r => setTimeout(r, 1000));
+                    // 等待展开动画和内容加载完成（大幅降低延迟以加快速度）
+                    await new Promise(r => setTimeout(r, 400));
                 } else {
-                    // 等待一下确保没有进行中的渲染
-                    await new Promise(r => setTimeout(r, 100));
+                    // 没有展开按钮，极短等待即可
+                    await new Promise(r => setTimeout(r, 50));
                 }
                 
                 const bgColor = window.getComputedStyle(document.body).backgroundColor || '#ffffff';
@@ -81,6 +119,7 @@ function addShareButtons() {
                 const originalCanvas = await htmlToImage.toCanvas(item, {
                     pixelRatio: pixelRatio,
                     backgroundColor: bgColor,
+                    skipFonts: true, // 忽略自定义字体加载，这能极大提升 html-to-image 的生成速度！
                     filter: (element) => {
                         // 忽略 noscript 标签，防止懒加载图片的原始 HTML 代码被当作纯文本渲染出来叠加在图上
                         if (element.tagName && element.tagName.toLowerCase() === 'noscript') return false;
@@ -114,12 +153,13 @@ function addShareButtons() {
                     return;
                 }
                 
-                // 将生成的 Blob 转换为 URL 存放在按钮属性上
+                // 恢复按钮状态
+                shareBtn.innerHTML = originalText;
+                shareBtn.dataset.state = 'idle';
+
+                // 将生成的 Blob 转换为 URL 并显示大弹窗
                 const blobUrl = URL.createObjectURL(blob);
-                shareBtn.dataset.blobUrl = blobUrl;
-                shareBtn.dataset.state = 'ready';
-                // 提示用户再次点击以复制
-                shareBtn.innerHTML = '<span style="display: inline-flex; align-items: center; color: #ff9800; font-weight: bold;">生成完毕，点击复制</span>';
+                showCopyModal(blobUrl);
                 
             } catch (err) {
                 console.error('html-to-image 错误:', err);
