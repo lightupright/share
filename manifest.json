@@ -1,16 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "知乎回答截图分享",
+  "name": "知乎截图",
   "version": "1.0",
-  "description": "给知乎回答添加分享按钮，点击自动截图当前回答，并复制到剪切板。",
+  "description": "给知乎回答添加截图按钮，点击自动截图当前回答，并复制到剪切板。",
   "permissions": [
     "clipboardWrite"
   ],
   "content_scripts": [
     {
-      "matches": ["*://*.zhihu.com/*"],
-      "js": ["html-to-image.min.js", "content.js"],
-      "css": ["content.css"]
+      "matches": [
+        "*://*.zhihu.com/*"
+      ],
+      "js": [
+        "html-to-image.min.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ]
     }
   ],
   "host_permissions": [
