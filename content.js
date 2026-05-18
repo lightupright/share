@@ -69,6 +69,9 @@ function addShareButtons() {
         const item = bar.closest('.AnswerItem, .ArticleItem');
         if (!item) return;
 
+        // 确认是否已经添加过截图按钮，如果已经添加过则不再添加
+        if (bar.querySelector('.share-screenshot-btn')) return;
+
         // 标记为已处理
         bar.classList.add('has-share-btn');
 
