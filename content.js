@@ -11,9 +11,13 @@ function showCopyModal(blobUrl) {
     title.textContent = '截图生成完毕！';
     title.style.cssText = 'margin:0 0 16px 0;font-size:20px;color:#121212;';
 
+    const previewWrapper = document.createElement('div');
+    previewWrapper.style.cssText = 'max-width:100%;max-height:calc(85vh - 130px);overflow-y:auto;border:1px solid #eee;border-radius:4px;background:#f9f9f9;';
+
     const imgPreview = document.createElement('img');
     imgPreview.src = blobUrl;
-    imgPreview.style.cssText = 'max-width:100%;max-height:calc(85vh - 130px);object-fit:contain;border:1px solid #eee;border-radius:4px;';
+    imgPreview.style.cssText = 'width:500px;max-width:100%;height:auto;display:block;';
+    previewWrapper.appendChild(imgPreview);
 
     const btnContainer = document.createElement('div');
     btnContainer.style.cssText = 'margin-top:20px;display:flex;gap:16px;';
@@ -53,11 +57,49 @@ function showCopyModal(blobUrl) {
     btnContainer.appendChild(closeBtn);
 
     modal.appendChild(title);
-    modal.appendChild(imgPreview);
+    modal.appendChild(previewWrapper);
     modal.appendChild(btnContainer);
 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
+}
+
+// 检测当前浏览器 Canvas 支持的最大安全高度（优先测试 65535，回退到 32767）
+let cachedMaxCanvasHeight = null;
+function getMaxCanvasHeight() {
+    if (cachedMaxCanvasHeight) return cachedMaxCanvasHeight;
+    for (const limit of [65535, 32767]) {
+        try {
+            const testCanvas = document.createElement('canvas');
+            testCanvas.width = 1;
+            testCanvas.height = limit;
+            const ctx = testCanvas.getContext('2d');
+            if (ctx) {
+                ctx.fillStyle = '#0f0';
+                ctx.fillRect(0, limit - 1, 1, 1);
+                const data = ctx.getImageData(0, limit - 1, 1, 1).data;
+                if (data[1] === 255) {
+                    cachedMaxCanvasHeight = limit;
+                    return limit;
+                }
+            }
+        } catch (e) {
+            // 忽略并尝试下一个上限
+        }
+    }
+    cachedMaxCanvasHeight = 32767;
+    return cachedMaxCanvasHeight;
+}
+
+function loadImage(url) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = url;
+    });
 }
 
 function addShareButtons() {
@@ -116,36 +158,127 @@ function addShareButtons() {
                 }
                 
                 const bgColor = window.getComputedStyle(document.body).backgroundColor || '#ffffff';
-                const pixelRatio = 2; // 提高清晰度
-                
-                // 先生成原始 Canvas
-                const originalCanvas = await htmlToImage.toCanvas(item, {
-                    pixelRatio: pixelRatio,
-                    backgroundColor: bgColor,
-                    skipFonts: true, // 忽略自定义字体加载，这能极大提升 html-to-image 的生成速度！
-                    filter: (element) => {
-                        // 忽略 noscript 标签，防止懒加载图片的原始 HTML 代码被当作纯文本渲染出来叠加在图上
-                        if (element.tagName && element.tagName.toLowerCase() === 'noscript') return false;
-                        // 忽略不需要截图的元素
-                        if (element.classList && element.classList.contains('Sticky')) return false;
-                        return true;
-                    }
-                });
-                
-                // 创建一个加上 20px padding 的新 Canvas
+                const desiredPixelRatio = 2; // 提高清晰度
                 const paddingPx = 20;
-                const canvasPadding = paddingPx * pixelRatio;
                 
+                // 保存原始样式，用于截图后恢复
+                const originalWidth = item.style.width;
+                const originalMaxWidth = item.style.maxWidth;
+                const originalMinWidth = item.style.minWidth;
+                const originalBoxSizing = item.style.boxSizing;
+
+                // 强制设置为 710px，加上左右各 20px 的 padding，最终生成的截图总宽度恰好为 750px
+                const targetWidthPx = 710;
+                const targetWidth = `${targetWidthPx}px`;
+                item.style.setProperty('width', targetWidth, 'important');
+                item.style.setProperty('max-width', targetWidth, 'important');
+                item.style.setProperty('min-width', targetWidth, 'important');
+                item.style.setProperty('box-sizing', 'border-box', 'important');
+
+                // 等待微任务/宏任务执行，让浏览器完成布局更新
+                await new Promise(r => setTimeout(r, 20));
+
+                let svgDataUrl;
+                let itemWidth;
+                let itemHeight;
+                try {
+                    const cs = window.getComputedStyle(item);
+                    const borderLeft = parseFloat(cs.getPropertyValue('border-left-width')) || 0;
+                    const borderRight = parseFloat(cs.getPropertyValue('border-right-width')) || 0;
+                    const borderTop = parseFloat(cs.getPropertyValue('border-top-width')) || 0;
+                    const borderBottom = parseFloat(cs.getPropertyValue('border-bottom-width')) || 0;
+                    itemWidth = Math.ceil(item.clientWidth + borderLeft + borderRight) || targetWidthPx;
+                    itemHeight = Math.ceil(item.clientHeight + borderTop + borderBottom);
+
+                    // 先导出为矢量 SVG（避免 html-to-image 在 toCanvas 中因高度超过 16384px 而自动缩小分辨率导致文字模糊）
+                    svgDataUrl = await htmlToImage.toSvg(item, {
+                        width: itemWidth,
+                        height: itemHeight,
+                        backgroundColor: bgColor,
+                        skipFonts: true, // 忽略自定义字体加载，极大提升生成速度
+                        filter: (element) => {
+                            // 忽略 noscript 标签，防止懒加载图片的原始 HTML 代码被当作纯文本渲染出来叠加在图上
+                            if (element.tagName && element.tagName.toLowerCase() === 'noscript') return false;
+                            // 忽略不需要截图的元素
+                            if (element.classList && element.classList.contains('Sticky')) return false;
+                            return true;
+                        }
+                    });
+                } finally {
+                    // 无论成功还是失败，都必须恢复原始样式，防止影响网页排版
+                    if (originalWidth) {
+                        item.style.width = originalWidth;
+                    } else {
+                        item.style.removeProperty('width');
+                    }
+                    if (originalMaxWidth) {
+                        item.style.maxWidth = originalMaxWidth;
+                    } else {
+                        item.style.removeProperty('max-width');
+                    }
+                    if (originalMinWidth) {
+                        item.style.minWidth = originalMinWidth;
+                    } else {
+                        item.style.removeProperty('min-width');
+                    }
+                    if (originalBoxSizing) {
+                        item.style.boxSizing = originalBoxSizing;
+                    } else {
+                        item.style.removeProperty('box-sizing');
+                    }
+                }
+
+                // 计算在浏览器 Canvas 最大高度限制下可用的最高缩放倍率
+                const totalCssHeight = itemHeight + paddingPx * 2;
+                const totalCssWidth = itemWidth + paddingPx * 2;
+                const maxCanvasHeight = getMaxCanvasHeight();
+                const maxCanvasArea = 16384 * 16384; // 浏览器 Canvas 最大像素面积限制 (~2.68 亿像素)
+                const maxRatioByHeight = maxCanvasHeight / totalCssHeight;
+                const maxRatioByArea = Math.sqrt(maxCanvasArea / (totalCssWidth * totalCssHeight));
+                const pixelRatio = Math.min(desiredPixelRatio, maxRatioByHeight, maxRatioByArea);
+
+                const canvasPadding = Math.round(paddingPx * pixelRatio);
                 const paddedCanvas = document.createElement('canvas');
-                paddedCanvas.width = originalCanvas.width + canvasPadding * 2;
-                paddedCanvas.height = originalCanvas.height + canvasPadding * 2;
-                
+                paddedCanvas.width = Math.round(itemWidth * pixelRatio) + canvasPadding * 2;
+                paddedCanvas.height = Math.round(itemHeight * pixelRatio) + canvasPadding * 2;
+
                 const ctx = paddedCanvas.getContext('2d');
-                // 填充统一的背景色
                 ctx.fillStyle = bgColor;
                 ctx.fillRect(0, 0, paddedCanvas.width, paddedCanvas.height);
-                // 把原始截图绘制到带 padding 的画布中心
-                ctx.drawImage(originalCanvas, canvasPadding, canvasPadding);
+
+                // 分片渲染 SVG 到 Canvas，避免单张 SVG 纹理高度超过 GPU 16384px 限制导致模糊或空白
+                const maxSliceCssHeight = Math.floor(8192 / Math.max(pixelRatio, 1));
+                if (itemHeight <= maxSliceCssHeight) {
+                    const img = await loadImage(svgDataUrl);
+                    ctx.drawImage(
+                        img,
+                        canvasPadding,
+                        canvasPadding,
+                        Math.round(itemWidth * pixelRatio),
+                        Math.round(itemHeight * pixelRatio)
+                    );
+                } else {
+                    const prefix = 'data:image/svg+xml;charset=utf-8,';
+                    const rawSvg = decodeURIComponent(svgDataUrl.slice(prefix.length));
+                    for (let offsetY = 0; offsetY < itemHeight; offsetY += maxSliceCssHeight) {
+                        const sliceCssH = Math.min(maxSliceCssHeight, itemHeight - offsetY);
+                        const sliceSvg = rawSvg
+                            .replace(
+                                /^<svg[^>]*>/,
+                                `<svg xmlns="http://www.w3.org/2000/svg" width="${itemWidth}" height="${sliceCssH}" viewBox="0 0 ${itemWidth} ${sliceCssH}">`
+                            )
+                            .replace(
+                                /<foreignObject[^>]*>/,
+                                `<foreignObject width="${itemWidth}" height="${itemHeight}" x="0" y="-${offsetY}" externalResourcesRequired="true">`
+                            );
+                        const sliceUrl = prefix + encodeURIComponent(sliceSvg);
+                        const sliceImg = await loadImage(sliceUrl);
+                        const destY = canvasPadding + Math.round(offsetY * pixelRatio);
+                        const destW = Math.round(itemWidth * pixelRatio);
+                        const destH = Math.round(sliceCssH * pixelRatio);
+                        ctx.drawImage(sliceImg, canvasPadding, destY, destW, destH);
+                    }
+                }
                 
                 const blob = await new Promise(resolve => paddedCanvas.toBlob(resolve, 'image/png'));
                 
